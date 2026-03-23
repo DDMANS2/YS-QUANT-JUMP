@@ -1,5 +1,7 @@
 import express from 'express';
-import yahooFinance from 'yahoo-finance2';
+import YahooFinance from 'yahoo-finance2';
+
+const yf = new YahooFinance({ suppressNotices: ['yahooSurvey'] });
 
 const app = express();
 const PORT = 3000;
@@ -347,75 +349,91 @@ async function fetchMarketNews(display: number = 10) {
   return null;
 }
 
-app.get('/api/macro', (req, res) => {
-  res.json({
-    indicators: [
-      { 
-        name: '원/달러 환율', 
-        value: 1495.70, 
-        change: 0, 
-        changePercent: 0, 
-        unit: '원', 
-        trend: 'flat',
-        upImpact: '수출 기업(자동차, 반도체 등) 실적 호조',
-        downImpact: '수입 의존 기업(항공, 식음료) 유리',
-        link: 'https://www.google.com/finance/quote/USD-KRW'
-      },
-      { 
-        name: 'WTI 원유', 
-        value: 95.55, 
-        change: 0.09, 
-        changePercent: 0.09, 
-        unit: '달러', 
-        trend: 'up',
-        upImpact: '정유/대체에너지 수혜, 항공/해운 악재',
-        downImpact: '유류비 절감으로 항공/해운 수혜',
-        link: 'https://www.google.com/finance/quote/CLW00:NYMEX'
-      },
-      { 
-        name: '미 10년물 국채', 
-        value: 4.251, 
-        change: -0.006, 
-        changePercent: -0.14, 
-        unit: '%', 
-        trend: 'down',
-        upImpact: '기술주/성장주 악재, 금융주 수혜',
-        downImpact: '기술주/성장주 수혜',
-        link: 'https://www.google.com/finance/quote/US10Y:BOND'
-      },
-      { 
-        name: 'VIX (공포지수)', 
-        value: 24.06, 
-        change: -1.03, 
-        changePercent: -4.11, 
-        unit: 'pt', 
-        trend: 'down',
-        upImpact: '안전자산 선호 심리 강해짐',
-        downImpact: '위험자산(주식) 선호 심리 회복',
-        link: 'https://www.google.com/finance/quote/VIX:INDEXCBOE'
-      }
-    ],
-    insights: [
-      {
-        title: '고환율 지속에 따른 수출주 주목',
-        description: '원/달러 환율이 1490원대를 돌파하며 역대급 고환율 기조가 이어지고 있습니다. 이는 수입 물가 상승으로 내수 기업에는 부담이지만, 자동차, 반도체 등 수출 비중이 높은 기업들의 실적 개선(환차익)으로 이어질 수 있습니다.',
-        impact: 'positive',
-        beneficiaries: ['고환율수혜', '수출주']
-      },
-      {
-        title: '중동 지정학적 긴장과 유가 상승',
-        description: '이스라엘-이란 갈등 고조로 WTI 원유 가격이 배럴당 95달러를 돌파했습니다. 정유주와 대체에너지 관련주가 단기적인 수혜를 볼 수 있으나, 항공 및 해운업종은 유류비 부담 증가로 악재가 될 수 있습니다.',
-        impact: 'negative',
-        beneficiaries: ['유가상승수혜', '전쟁수혜']
-      },
-      {
-        title: '파월 의장 비둘기파적 발언, 금리 인하 기대감',
-        description: '미 연준(Fed) 파월 의장의 금리 인하 시사 발언으로 미 10년물 국채 금리가 4.25%대로 하락세로 전환했습니다. 할인율 하락으로 인해 네이버, 카카오 등 성장주와 바이오 섹터의 투자 심리가 개선될 전망입니다.',
-        impact: 'positive',
-        beneficiaries: ['금리인하수혜']
-      }
-    ]
-  });
+app.get('/api/macro', async (req, res) => {
+  try {
+    const symbols = ['KRW=X', 'CL=F', '^TNX', '^VIX'];
+    const quotes = await Promise.all(
+      symbols.map(symbol => yf.quote(symbol).catch(() => null))
+    );
+
+    const [krwQuote, wtiQuote, tnxQuote, vixQuote] = quotes;
+
+    const getTrend = (change: number) => change > 0 ? 'up' : change < 0 ? 'down' : 'flat';
+    const formatNum = (num: number | undefined | null, decimals: number = 2) => 
+      num !== undefined && num !== null ? Number(num.toFixed(decimals)) : 0;
+
+    res.json({
+      indicators: [
+        { 
+          name: '원/달러 환율', 
+          value: formatNum(krwQuote?.regularMarketPrice), 
+          change: formatNum(krwQuote?.regularMarketChange), 
+          changePercent: formatNum(krwQuote?.regularMarketChangePercent), 
+          unit: '원', 
+          trend: krwQuote ? getTrend(krwQuote.regularMarketChange || 0) : 'flat',
+          upImpact: '수출 기업(자동차, 반도체 등) 실적 호조',
+          downImpact: '수입 의존 기업(항공, 식음료) 유리',
+          link: 'https://www.google.com/finance/quote/USD-KRW'
+        },
+        { 
+          name: 'WTI 원유', 
+          value: formatNum(wtiQuote?.regularMarketPrice), 
+          change: formatNum(wtiQuote?.regularMarketChange), 
+          changePercent: formatNum(wtiQuote?.regularMarketChangePercent), 
+          unit: '달러', 
+          trend: wtiQuote ? getTrend(wtiQuote.regularMarketChange || 0) : 'flat',
+          upImpact: '정유/대체에너지 수혜, 항공/해운 악재',
+          downImpact: '유류비 절감으로 항공/해운 수혜',
+          link: 'https://www.google.com/finance/quote/CLW00:NYMEX'
+        },
+        { 
+          name: '미 10년물 국채', 
+          value: formatNum(tnxQuote?.regularMarketPrice, 3), 
+          change: formatNum(tnxQuote?.regularMarketChange, 3), 
+          changePercent: formatNum(tnxQuote?.regularMarketChangePercent), 
+          unit: '%', 
+          trend: tnxQuote ? getTrend(tnxQuote.regularMarketChange || 0) : 'flat',
+          upImpact: '기술주/성장주 악재, 금융주 수혜',
+          downImpact: '기술주/성장주 수혜',
+          link: 'https://www.google.com/finance/quote/US10Y:BOND'
+        },
+        { 
+          name: 'VIX (공포지수)', 
+          value: formatNum(vixQuote?.regularMarketPrice), 
+          change: formatNum(vixQuote?.regularMarketChange), 
+          changePercent: formatNum(vixQuote?.regularMarketChangePercent), 
+          unit: 'pt', 
+          trend: vixQuote ? getTrend(vixQuote.regularMarketChange || 0) : 'flat',
+          upImpact: '안전자산 선호 심리 강해짐',
+          downImpact: '위험자산(주식) 선호 심리 회복',
+          link: 'https://www.google.com/finance/quote/VIX:INDEXCBOE'
+        }
+      ],
+      insights: [
+        {
+          title: '고환율 지속에 따른 수출주 주목',
+          description: '원/달러 환율이 1490원대를 돌파하며 역대급 고환율 기조가 이어지고 있습니다. 이는 수입 물가 상승으로 내수 기업에는 부담이지만, 자동차, 반도체 등 수출 비중이 높은 기업들의 실적 개선(환차익)으로 이어질 수 있습니다.',
+          impact: 'positive',
+          beneficiaries: ['고환율수혜', '수출주']
+        },
+        {
+          title: '중동 지정학적 긴장과 유가 상승',
+          description: '이스라엘-이란 갈등 고조로 WTI 원유 가격이 배럴당 95달러를 돌파했습니다. 정유주와 대체에너지 관련주가 단기적인 수혜를 볼 수 있으나, 항공 및 해운업종은 유류비 부담 증가로 악재가 될 수 있습니다.',
+          impact: 'negative',
+          beneficiaries: ['유가상승수혜', '전쟁수혜']
+        },
+        {
+          title: '파월 의장 비둘기파적 발언, 금리 인하 기대감',
+          description: '미 연준(Fed) 파월 의장의 금리 인하 시사 발언으로 미 10년물 국채 금리가 4.25%대로 하락세로 전환했습니다. 할인율 하락으로 인해 네이버, 카카오 등 성장주와 바이오 섹터의 투자 심리가 개선될 전망입니다.',
+          impact: 'positive',
+          beneficiaries: ['금리인하수혜']
+        }
+      ]
+    });
+  } catch (error) {
+    console.error('Failed to fetch macro data:', error);
+    res.status(500).json({ error: 'Failed to fetch macro data' });
+  }
 });
 
 app.get('/api/news', async (req, res) => {
