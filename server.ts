@@ -362,11 +362,104 @@ app.get('/api/macro', async (req, res) => {
     const formatNum = (num: number | undefined | null, decimals: number = 2) => 
       num !== undefined && num !== null ? Number(num.toFixed(decimals)) : 0;
 
+    const krwPrice = formatNum(krwQuote?.regularMarketPrice);
+    const wtiPrice = formatNum(wtiQuote?.regularMarketPrice);
+    const tnxPrice = formatNum(tnxQuote?.regularMarketPrice, 3);
+    const vixPrice = formatNum(vixQuote?.regularMarketPrice);
+
+    const generateInsights = () => {
+      const insights = [];
+
+      // KRW/USD Insight
+      if (krwPrice >= 1400) {
+        insights.push({
+          title: `고환율(${krwPrice}원) 지속에 따른 수출주 주목`,
+          description: `원/달러 환율이 ${krwPrice}원대로 높은 수준을 유지하고 있습니다. 수입 물가 상승으로 내수 기업에는 부담이지만, 자동차, 반도체 등 수출 비중이 높은 기업들의 실적 개선(환차익)으로 이어질 수 있습니다.`,
+          impact: 'positive',
+          beneficiaries: ['자동차', '반도체', '수출주']
+        });
+      } else if (krwPrice <= 1300) {
+        insights.push({
+          title: `원화 강세(${krwPrice}원) 전환, 수입주 수혜 기대`,
+          description: `원/달러 환율이 ${krwPrice}원대로 하락하며 원화 강세 흐름을 보이고 있습니다. 원자재 수입 비중이 높은 식음료, 항공 업종의 수익성 개선이 기대됩니다.`,
+          impact: 'positive',
+          beneficiaries: ['항공', '식음료', '수입주']
+        });
+      } else {
+        insights.push({
+          title: `환율(${krwPrice}원) 안정세, 종목별 장세 예상`,
+          description: `원/달러 환율이 ${krwPrice}원대로 비교적 안정적인 흐름을 보이고 있습니다. 환율 변동성보다는 개별 기업의 실적 모멘텀에 주목할 필요가 있습니다.`,
+          impact: 'neutral',
+          beneficiaries: ['실적주']
+        });
+      }
+
+      // WTI Insight
+      if (wtiPrice >= 85) {
+        insights.push({
+          title: `국제 유가(${wtiPrice}달러) 강세, 에너지주 주목`,
+          description: `WTI 원유 가격이 배럴당 ${wtiPrice}달러를 상회하며 강세를 보이고 있습니다. 정유주와 대체에너지 관련주가 수혜를 볼 수 있으나, 항공 및 해운업종은 유류비 부담 증가로 악재가 될 수 있습니다.`,
+          impact: 'negative',
+          beneficiaries: ['정유', '대체에너지']
+        });
+      } else if (wtiPrice <= 70) {
+        insights.push({
+          title: `국제 유가(${wtiPrice}달러) 하락, 운송주 비용 절감`,
+          description: `WTI 원유 가격이 배럴당 ${wtiPrice}달러 수준으로 하락했습니다. 유류비 비중이 높은 항공, 해운, 물류 업종의 비용 절감 및 실적 개선이 기대됩니다.`,
+          impact: 'positive',
+          beneficiaries: ['항공', '해운', '물류']
+        });
+      } else {
+        insights.push({
+          title: `국제 유가(${wtiPrice}달러) 안정화, 인플레이션 우려 완화`,
+          description: `WTI 원유 가격이 배럴당 ${wtiPrice}달러 수준에서 안정적인 흐름을 보이고 있습니다. 유가 안정으로 인해 전반적인 인플레이션 우려가 다소 완화될 수 있습니다.`,
+          impact: 'neutral',
+          beneficiaries: ['소비재']
+        });
+      }
+
+      // TNX Insight
+      if (tnxPrice >= 4.5) {
+        insights.push({
+          title: `미 국채 금리(${tnxPrice}%) 상승, 가치주/금융주 유리`,
+          description: `미 10년물 국채 금리가 ${tnxPrice}%대로 상승했습니다. 할인율 상승으로 인해 성장주(기술주, 바이오)에는 부담이 될 수 있으며, 예대마진 개선이 기대되는 금융주에는 긍정적입니다.`,
+          impact: 'negative',
+          beneficiaries: ['은행', '보험', '가치주']
+        });
+      } else if (tnxPrice <= 4.0) {
+        insights.push({
+          title: `미 국채 금리(${tnxPrice}%) 하락, 성장주 투자 심리 개선`,
+          description: `미 10년물 국채 금리가 ${tnxPrice}%대로 하락했습니다. 할인율 하락으로 인해 네이버, 카카오 등 인터넷/게임주와 바이오 섹터 등 성장주의 투자 심리가 개선될 전망입니다.`,
+          impact: 'positive',
+          beneficiaries: ['인터넷', '게임', '바이오', '성장주']
+        });
+      }
+
+      // VIX Insight
+      if (vixPrice >= 20) {
+        insights.push({
+          title: `VIX 지수(${vixPrice}) 급등, 안전자산 선호 심리 강화`,
+          description: `공포지수로 불리는 VIX 지수가 ${vixPrice} 수준으로 상승하며 시장 변동성이 커지고 있습니다. 주식 등 위험자산 비중을 조절하고 방어주나 배당주 위주의 보수적 접근이 필요합니다.`,
+          impact: 'negative',
+          beneficiaries: ['통신', '전력', '고배당주']
+        });
+      } else if (vixPrice <= 15) {
+        insights.push({
+          title: `VIX 지수(${vixPrice}) 안정화, 위험자산 선호 회복`,
+          description: `VIX 지수가 ${vixPrice} 수준으로 하락하며 시장 변동성이 완화되고 있습니다. 투자 심리가 개선되며 주식 시장 전반에 긍정적인 자금 유입이 기대됩니다.`,
+          impact: 'positive',
+          beneficiaries: ['낙폭과대주', '시장주도주']
+        });
+      }
+
+      return insights;
+    };
+
     res.json({
       indicators: [
         { 
           name: '원/달러 환율', 
-          value: formatNum(krwQuote?.regularMarketPrice), 
+          value: krwPrice, 
           change: formatNum(krwQuote?.regularMarketChange), 
           changePercent: formatNum(krwQuote?.regularMarketChangePercent), 
           unit: '원', 
@@ -377,7 +470,7 @@ app.get('/api/macro', async (req, res) => {
         },
         { 
           name: 'WTI 원유', 
-          value: formatNum(wtiQuote?.regularMarketPrice), 
+          value: wtiPrice, 
           change: formatNum(wtiQuote?.regularMarketChange), 
           changePercent: formatNum(wtiQuote?.regularMarketChangePercent), 
           unit: '달러', 
@@ -388,7 +481,7 @@ app.get('/api/macro', async (req, res) => {
         },
         { 
           name: '미 10년물 국채', 
-          value: formatNum(tnxQuote?.regularMarketPrice, 3), 
+          value: tnxPrice, 
           change: formatNum(tnxQuote?.regularMarketChange, 3), 
           changePercent: formatNum(tnxQuote?.regularMarketChangePercent), 
           unit: '%', 
@@ -399,7 +492,7 @@ app.get('/api/macro', async (req, res) => {
         },
         { 
           name: 'VIX (공포지수)', 
-          value: formatNum(vixQuote?.regularMarketPrice), 
+          value: vixPrice, 
           change: formatNum(vixQuote?.regularMarketChange), 
           changePercent: formatNum(vixQuote?.regularMarketChangePercent), 
           unit: 'pt', 
@@ -409,26 +502,7 @@ app.get('/api/macro', async (req, res) => {
           link: 'https://www.google.com/finance/quote/VIX:INDEXCBOE'
         }
       ],
-      insights: [
-        {
-          title: '고환율 지속에 따른 수출주 주목',
-          description: '원/달러 환율이 1490원대를 돌파하며 역대급 고환율 기조가 이어지고 있습니다. 이는 수입 물가 상승으로 내수 기업에는 부담이지만, 자동차, 반도체 등 수출 비중이 높은 기업들의 실적 개선(환차익)으로 이어질 수 있습니다.',
-          impact: 'positive',
-          beneficiaries: ['고환율수혜', '수출주']
-        },
-        {
-          title: '중동 지정학적 긴장과 유가 상승',
-          description: '이스라엘-이란 갈등 고조로 WTI 원유 가격이 배럴당 95달러를 돌파했습니다. 정유주와 대체에너지 관련주가 단기적인 수혜를 볼 수 있으나, 항공 및 해운업종은 유류비 부담 증가로 악재가 될 수 있습니다.',
-          impact: 'negative',
-          beneficiaries: ['유가상승수혜', '전쟁수혜']
-        },
-        {
-          title: '파월 의장 비둘기파적 발언, 금리 인하 기대감',
-          description: '미 연준(Fed) 파월 의장의 금리 인하 시사 발언으로 미 10년물 국채 금리가 4.25%대로 하락세로 전환했습니다. 할인율 하락으로 인해 네이버, 카카오 등 성장주와 바이오 섹터의 투자 심리가 개선될 전망입니다.',
-          impact: 'positive',
-          beneficiaries: ['금리인하수혜']
-        }
-      ]
+      insights: generateInsights()
     });
   } catch (error) {
     console.error('Failed to fetch macro data:', error);
