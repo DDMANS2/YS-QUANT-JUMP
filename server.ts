@@ -103,21 +103,37 @@ async function fetchNaverNews(keyword: string) {
 
 async function fetchCurrentPrice(code: string): Promise<number | null> {
   try {
-    const response = await fetch(`https://finance.naver.com/item/main.naver?code=${code}`);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3000);
+    const response = await fetch(`https://finance.naver.com/item/main.naver?code=${code}`, {
+      signal: controller.signal,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      }
+    });
+    clearTimeout(timeoutId);
     const html = await response.text();
     const match = html.match(/<p class="no_today">\s*<em[^>]*>\s*<span class="blind">([\d,]+)<\/span>/);
     if (match && match[1]) {
       return parseInt(match[1].replace(/,/g, ''), 10);
     }
   } catch (error) {
-    console.error(`Failed to fetch price for ${code}:`, error);
+    console.error(`Failed to fetch price for ${code}:`, error instanceof Error ? error.message : error);
   }
   return null;
 }
 
 async function fetchTargetPrice(code: string): Promise<{ targetPrice: number | null, broker: string | null }> {
   try {
-    const response = await fetch(`https://finance.naver.com/item/main.naver?code=${code}`);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3000);
+    const response = await fetch(`https://finance.naver.com/item/main.naver?code=${code}`, {
+      signal: controller.signal,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      }
+    });
+    clearTimeout(timeoutId);
     const html = await response.text();
     
     const targetMatch = html.match(/투자의견<span class="bar">l<\/span>목표주가[\s\S]*?<td[^>]*>[\s\S]*?<span class="bar">l<\/span>\s*<em[^>]*>([\d,]+)<\/em>/);
@@ -217,72 +233,81 @@ const THEME_MAP: Record<string, string[]> = {
 };
 
 const generateStocks = async (market: 'KOSPI' | 'KOSDAQ', data: {name: string, code: string, basePrice: number}[]) => {
-  const stocks = await Promise.all(data.map(async (item, index) => {
-    const realPrice = await fetchCurrentPrice(item.code);
-    const currentPrice = realPrice || item.basePrice;
-    const disparity = Math.floor(Math.random() * 150) - 20; // -20% to 130%
-    const targetPrice = Math.floor(currentPrice * (1 + disparity / 100));
-    const score = Math.floor(Math.random() * 30) + 70; // 70 to 100
-    const roe = parseFloat((Math.random() * 30 + 5).toFixed(1));
-    const per = parseFloat((Math.random() * 20 + 5).toFixed(1));
-    const peg = parseFloat((Math.random() * 1.5 + 0.1).toFixed(2));
-    const fcf = Math.floor(Math.random() * 5000) + 100; // in 100M KRW
-    const pbr = parseFloat((Math.random() * 3 + 0.5).toFixed(2));
-    const valueScore = calculateValueScore(roe, per, peg, fcf, pbr);
-    const signal = Math.random() > 0.5 ? 'BUY' : 'WAIT';
-    
-    const sectors = ['IT', '금융', '제조', '바이오', '서비스', '화학', '건설'];
-    const sector = sectors[Math.floor(Math.random() * sectors.length)];
-    const sectorRoe = parseFloat((Math.random() * 15 + 5).toFixed(1));
-    const sectorPer = parseFloat((Math.random() * 15 + 10).toFixed(1));
-    const sectorPeg = parseFloat((Math.random() * 1.0 + 0.5).toFixed(2));
-    const sectorFcf = Math.floor(Math.random() * 2000) + 500;
-    const sectorPbr = parseFloat((Math.random() * 1.5 + 0.5).toFixed(2));
-    
-    const realNews = await fetchNaverNews(item.name);
-    const newsList = ['HBM 퀄테스트 임박', '쌍끌이 매수세', '어닝 서프라이즈 기대', '신제품 출시 임박', '외인 대량 매수', '자사주 소각 결정', '목표가 상향 리포트', '기관 순매수 전환'];
-    const news = realNews ? realNews.title : newsList[Math.floor(Math.random() * newsList.length)];
-    
-    const brokers = ['삼성증권', 'NH투자증권', 'KB증권', '미래에셋증권', '한국투자증권', '키움증권'];
-    const targetBroker = brokers[Math.floor(Math.random() * brokers.length)];
-    
-    const themes = THEME_MAP[item.name] || ['기타'];
-    const targetUpgraded = Math.random() > 0.7; // 30% chance of target price upgrade
-    
-    // Generate a random date within the last 30 days
-    const date = new Date();
-    date.setDate(date.getDate() - Math.floor(Math.random() * 30));
-    const targetDate = `${date.getFullYear()}/${String(date.getMonth() + 1).padStart(2, '0')}/${String(date.getDate()).padStart(2, '0')}`;
+  const stocks = [];
+  const chunkSize = 5;
+  
+  for (let i = 0; i < data.length; i += chunkSize) {
+    const chunk = data.slice(i, i + chunkSize);
+    const chunkResults = await Promise.all(chunk.map(async (item, index) => {
+      const realPrice = await fetchCurrentPrice(item.code);
+      const currentPrice = realPrice || item.basePrice;
+      const disparity = Math.floor(Math.random() * 150) - 20; // -20% to 130%
+      const targetPrice = Math.floor(currentPrice * (1 + disparity / 100));
+      const score = Math.floor(Math.random() * 30) + 70; // 70 to 100
+      const roe = parseFloat((Math.random() * 30 + 5).toFixed(1));
+      const per = parseFloat((Math.random() * 20 + 5).toFixed(1));
+      const peg = parseFloat((Math.random() * 1.5 + 0.1).toFixed(2));
+      const fcf = Math.floor(Math.random() * 5000) + 100; // in 100M KRW
+      const pbr = parseFloat((Math.random() * 3 + 0.5).toFixed(2));
+      const valueScore = calculateValueScore(roe, per, peg, fcf, pbr);
+      const signal = Math.random() > 0.5 ? 'BUY' : 'WAIT';
+      
+      const sectors = ['IT', '금융', '제조', '바이오', '서비스', '화학', '건설'];
+      const sector = sectors[Math.floor(Math.random() * sectors.length)];
+      const sectorRoe = parseFloat((Math.random() * 15 + 5).toFixed(1));
+      const sectorPer = parseFloat((Math.random() * 15 + 10).toFixed(1));
+      const sectorPeg = parseFloat((Math.random() * 1.0 + 0.5).toFixed(2));
+      const sectorFcf = Math.floor(Math.random() * 2000) + 500;
+      const sectorPbr = parseFloat((Math.random() * 1.5 + 0.5).toFixed(2));
+      
+      const realNews = await fetchNaverNews(item.name);
+      const newsList = ['HBM 퀄테스트 임박', '쌍끌이 매수세', '어닝 서프라이즈 기대', '신제품 출시 임박', '외인 대량 매수', '자사주 소각 결정', '목표가 상향 리포트', '기관 순매수 전환'];
+      const news = realNews ? realNews.title : newsList[Math.floor(Math.random() * newsList.length)];
+      
+      const brokers = ['삼성증권', 'NH투자증권', 'KB증권', '미래에셋증권', '한국투자증권', '키움증권'];
+      const targetBroker = brokers[Math.floor(Math.random() * brokers.length)];
+      
+      const themes = THEME_MAP[item.name] || ['기타'];
+      const targetUpgraded = Math.random() > 0.7; // 30% chance of target price upgrade
+      
+      // Generate a random date within the last 30 days
+      const date = new Date();
+      date.setDate(date.getDate() - Math.floor(Math.random() * 30));
+      const targetDate = `${date.getFullYear()}/${String(date.getMonth() + 1).padStart(2, '0')}/${String(date.getDate()).padStart(2, '0')}`;
 
-    return {
-      id: `${market}-${index}`,
-      code: item.code,
-      name: item.name,
-      market,
-      sector,
-      score,
-      targetPrice,
-      targetBroker,
-      targetDate,
-      currentPrice,
-      disparity,
-      roe,
-      sectorRoe,
-      per,
-      sectorPer,
-      peg,
-      sectorPeg,
-      fcf,
-      sectorFcf,
-      pbr,
-      sectorPbr,
-      valueScore,
-      signal,
-      news,
-      themes,
-      targetUpgraded
-    };
-  }));
+      return {
+        id: `${market}-${i + index}`,
+        code: item.code,
+        name: item.name,
+        market,
+        sector,
+        score,
+        targetPrice,
+        targetBroker,
+        targetDate,
+        currentPrice,
+        disparity,
+        roe,
+        sectorRoe,
+        per,
+        sectorPer,
+        peg,
+        sectorPeg,
+        fcf,
+        sectorFcf,
+        pbr,
+        sectorPbr,
+        valueScore,
+        signal,
+        news,
+        themes,
+        targetUpgraded
+      };
+    }));
+    stocks.push(...chunkResults);
+    // Add a small delay between chunks to avoid rate limiting
+    await new Promise(resolve => setTimeout(resolve, 500));
+  }
   
   return stocks.sort((a, b) => b.score - a.score);
 };
@@ -300,25 +325,34 @@ app.get('/api/stocks', async (req, res) => {
 
 app.get('/api/refresh', async (req, res) => {
   // Update prices and news slightly to simulate real-time
-  const updatedStocks = await Promise.all(mockStocks.map(async (stock) => {
-    const realPrice = await fetchCurrentPrice(stock.code);
-    const newPrice = realPrice || stock.currentPrice;
-    const newDisparity = ((stock.targetPrice - newPrice) / newPrice) * 100;
-    
-    let newNews = stock.news;
-    // Only update news 30% of the time to avoid hitting API limits too hard
-    if (Math.random() > 0.7) {
-      const realNews = await fetchNaverNews(stock.name);
-      if (realNews) newNews = realNews.title;
-    }
+  const updatedStocks = [];
+  const chunkSize = 5;
+  
+  for (let i = 0; i < mockStocks.length; i += chunkSize) {
+    const chunk = mockStocks.slice(i, i + chunkSize);
+    const chunkResults = await Promise.all(chunk.map(async (stock) => {
+      const realPrice = await fetchCurrentPrice(stock.code);
+      const newPrice = realPrice || stock.currentPrice;
+      const newDisparity = ((stock.targetPrice - newPrice) / newPrice) * 100;
+      
+      let newNews = stock.news;
+      // Only update news 30% of the time to avoid hitting API limits too hard
+      if (Math.random() > 0.7) {
+        const realNews = await fetchNaverNews(stock.name);
+        if (realNews) newNews = realNews.title;
+      }
 
-    return {
-      ...stock,
-      currentPrice: newPrice,
-      disparity: Math.round(newDisparity),
-      news: newNews
-    };
-  }));
+      return {
+        ...stock,
+        currentPrice: newPrice,
+        disparity: Math.round(newDisparity),
+        news: newNews
+      };
+    }));
+    updatedStocks.push(...chunkResults);
+    // Add a small delay between chunks
+    await new Promise(resolve => setTimeout(resolve, 500));
+  }
   
   mockStocks = updatedStocks;
   res.json(mockStocks);
