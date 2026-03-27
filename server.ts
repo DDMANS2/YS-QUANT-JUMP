@@ -101,7 +101,7 @@ async function fetchNaverNews(keyword: string) {
   return null;
 }
 
-async function fetchCurrentPrice(code: string): Promise<number | null> {
+async function fetchNaverStockData(code: string): Promise<{ currentPrice: number | null, per: number | null, pbr: number | null, roe: number | null }> {
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 3000);
@@ -113,40 +113,45 @@ async function fetchCurrentPrice(code: string): Promise<number | null> {
     });
     clearTimeout(timeoutId);
     const html = await response.text();
-    const match = html.match(/<p class="no_today">\s*<em[^>]*>\s*<span class="blind">([\d,]+)<\/span>/);
-    if (match && match[1]) {
-      return parseInt(match[1].replace(/,/g, ''), 10);
+    
+    let currentPrice = null;
+    const priceMatch = html.match(/<p class="no_today">\s*<em[^>]*>\s*<span class="blind">([\d,]+)<\/span>/);
+    if (priceMatch && priceMatch[1]) {
+      currentPrice = parseInt(priceMatch[1].replace(/,/g, ''), 10);
     }
-  } catch (error) {
-    console.error(`Failed to fetch price for ${code}:`, error instanceof Error ? error.message : error);
-  }
-  return null;
-}
 
-async function fetchTargetPrice(code: string): Promise<{ targetPrice: number | null, broker: string | null }> {
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 3000);
-    const response = await fetch(`https://finance.naver.com/item/main.naver?code=${code}`, {
-      signal: controller.signal,
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    let per = null;
+    const perMatch = html.match(/<em id="_per">([\d,.]+)<\/em>/);
+    if (perMatch && perMatch[1]) {
+      per = parseFloat(perMatch[1].replace(/,/g, ''));
+    }
+
+    let pbr = null;
+    const pbrMatch = html.match(/<em id="_pbr">([\d,.]+)<\/em>/);
+    if (pbrMatch && pbrMatch[1]) {
+      pbr = parseFloat(pbrMatch[1].replace(/,/g, ''));
+    }
+
+    let roe = null;
+    const roeMatch = html.match(/<th scope="row" class="h_th2 th_cop_anal13"><strong>ROE\(지배주주\)<\/strong><\/th>([\s\S]*?)<\/tr>/);
+    if (roeMatch) {
+      const tds = roeMatch[1].match(/<td[^>]*>([\s\S]*?)<\/td>/g);
+      if (tds && tds.length >= 4) {
+        let roeStr = tds[3].replace(/<[^>]+>/g, '').trim();
+        if (!roeStr || isNaN(parseFloat(roeStr))) {
+          roeStr = tds[2].replace(/<[^>]+>/g, '').trim();
+        }
+        if (roeStr && !isNaN(parseFloat(roeStr))) {
+          roe = parseFloat(roeStr);
+        }
       }
-    });
-    clearTimeout(timeoutId);
-    const html = await response.text();
-    
-    const targetMatch = html.match(/투자의견<span class="bar">l<\/span>목표주가[\s\S]*?<td[^>]*>[\s\S]*?<span class="bar">l<\/span>\s*<em[^>]*>([\d,]+)<\/em>/);
-    const targetPrice = targetMatch && targetMatch[1] ? parseInt(targetMatch[1].replace(/,/g, ''), 10) : null;
-    
-    const brokerMatch = html.match(/<th[^>]*>투자의견\/목표주가<\/th>[\s\S]*?<td[^>]*>[\s\S]*?<span[^>]*>(.*?)<\/span>/);
-    // Wait, the broker is not easily available on the main page. Let's just use a random broker if we can't find it.
-    
-    return { targetPrice, broker: null };
+    }
+
+    return { currentPrice, per, pbr, roe };
   } catch (error) {
-    console.error(`Failed to fetch target price for ${code}:`, error);
+    console.error(`Failed to fetch data for ${code}:`, error instanceof Error ? error.message : error);
   }
-  return { targetPrice: null, broker: null };
+  return { currentPrice: null, per: null, pbr: null, roe: null };
 }
 
 function calculateValueScore(roe: number, per: number, peg: number, fcf: number, pbr: number): number {
@@ -239,16 +244,18 @@ const generateStocks = async (market: 'KOSPI' | 'KOSDAQ', data: {name: string, c
   for (let i = 0; i < data.length; i += chunkSize) {
     const chunk = data.slice(i, i + chunkSize);
     const chunkResults = await Promise.all(chunk.map(async (item, index) => {
-      const realPrice = await fetchCurrentPrice(item.code);
-      const currentPrice = realPrice || item.basePrice;
+      const stockData = await fetchNaverStockData(item.code);
+      const currentPrice = stockData.currentPrice || item.basePrice;
       const disparity = Math.floor(Math.random() * 150) - 20; // -20% to 130%
       const targetPrice = Math.floor(currentPrice * (1 + disparity / 100));
       const score = Math.floor(Math.random() * 30) + 70; // 70 to 100
-      const roe = parseFloat((Math.random() * 30 + 5).toFixed(1));
-      const per = parseFloat((Math.random() * 20 + 5).toFixed(1));
+      
+      const roe = stockData.roe !== null ? stockData.roe : parseFloat((Math.random() * 30 + 5).toFixed(1));
+      const per = stockData.per !== null ? stockData.per : parseFloat((Math.random() * 20 + 5).toFixed(1));
+      const pbr = stockData.pbr !== null ? stockData.pbr : parseFloat((Math.random() * 3 + 0.5).toFixed(2));
       const peg = parseFloat((Math.random() * 1.5 + 0.1).toFixed(2));
       const fcf = Math.floor(Math.random() * 5000) + 100; // in 100M KRW
-      const pbr = parseFloat((Math.random() * 3 + 0.5).toFixed(2));
+      
       const valueScore = calculateValueScore(roe, per, peg, fcf, pbr);
       const signal = Math.random() > 0.5 ? 'BUY' : 'WAIT';
       
@@ -331,9 +338,13 @@ app.get('/api/refresh', async (req, res) => {
   for (let i = 0; i < mockStocks.length; i += chunkSize) {
     const chunk = mockStocks.slice(i, i + chunkSize);
     const chunkResults = await Promise.all(chunk.map(async (stock) => {
-      const realPrice = await fetchCurrentPrice(stock.code);
-      const newPrice = realPrice || stock.currentPrice;
+      const stockData = await fetchNaverStockData(stock.code);
+      const newPrice = stockData.currentPrice || stock.currentPrice;
       const newDisparity = ((stock.targetPrice - newPrice) / newPrice) * 100;
+      
+      const newRoe = stockData.roe !== null ? stockData.roe : stock.roe;
+      const newPer = stockData.per !== null ? stockData.per : stock.per;
+      const newPbr = stockData.pbr !== null ? stockData.pbr : stock.pbr;
       
       let newNews = stock.news;
       // Only update news 30% of the time to avoid hitting API limits too hard
@@ -346,7 +357,10 @@ app.get('/api/refresh', async (req, res) => {
         ...stock,
         currentPrice: newPrice,
         disparity: Math.round(newDisparity),
-        news: newNews
+        news: newNews,
+        roe: newRoe,
+        per: newPer,
+        pbr: newPbr
       };
     }));
     updatedStocks.push(...chunkResults);
@@ -613,21 +627,21 @@ app.get('/api/search', async (req, res) => {
       const response = await fetch(`https://finance.naver.com/item/main.naver?code=${code}`);
       const html = await response.text();
       const nameMatch = html.match(/<title>([^:]+)\s*:\s*Npay/);
-      const priceMatch = html.match(/<p class="no_today">\s*<em[^>]*>\s*<span class="blind">([\d,]+)<\/span>/);
+      const stockData = await fetchNaverStockData(code);
       
-      if (nameMatch && priceMatch) {
+      if (nameMatch && stockData.currentPrice) {
         const name = nameMatch[1].trim();
-        const currentPrice = parseInt(priceMatch[1].replace(/,/g, ''), 10);
+        const currentPrice = stockData.currentPrice;
         
         // Generate mock data for the new stock
         const disparity = Math.floor(Math.random() * 150) - 20;
         const targetPrice = Math.floor(currentPrice * (1 + disparity / 100));
         const score = Math.floor(Math.random() * 30) + 70;
-        const roe = parseFloat((Math.random() * 30 + 5).toFixed(1));
-        const per = parseFloat((Math.random() * 20 + 5).toFixed(1));
+        const roe = stockData.roe !== null ? stockData.roe : parseFloat((Math.random() * 30 + 5).toFixed(1));
+        const per = stockData.per !== null ? stockData.per : parseFloat((Math.random() * 20 + 5).toFixed(1));
         const peg = parseFloat((Math.random() * 1.5 + 0.1).toFixed(2));
         const fcf = Math.floor(Math.random() * 5000) + 100;
-        const pbr = parseFloat((Math.random() * 3 + 0.5).toFixed(2));
+        const pbr = stockData.pbr !== null ? stockData.pbr : parseFloat((Math.random() * 3 + 0.5).toFixed(2));
         const valueScore = calculateValueScore(roe, per, peg, fcf, pbr);
         const signal = Math.random() > 0.5 ? 'BUY' : 'WAIT';
         
