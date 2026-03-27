@@ -76,6 +76,7 @@ export default function App() {
 
   const handleRefresh = async () => {
     setRefreshing(true);
+    setLoading(true);
     try {
       const [stocksRes, newsRes, macroRes] = await Promise.all([
         fetch('/api/refresh'),
@@ -91,6 +92,7 @@ export default function App() {
     } catch (error) {
       console.error('Failed to refresh data', error);
     } finally {
+      setLoading(false);
       setTimeout(() => setRefreshing(false), 500); // Minimum animation time
     }
   };

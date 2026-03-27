@@ -331,44 +331,10 @@ app.get('/api/stocks', async (req, res) => {
 });
 
 app.get('/api/refresh', async (req, res) => {
-  // Update prices and news slightly to simulate real-time
-  const updatedStocks = [];
-  const chunkSize = 5;
-  
-  for (let i = 0; i < mockStocks.length; i += chunkSize) {
-    const chunk = mockStocks.slice(i, i + chunkSize);
-    const chunkResults = await Promise.all(chunk.map(async (stock) => {
-      const stockData = await fetchNaverStockData(stock.code);
-      const newPrice = stockData.currentPrice || stock.currentPrice;
-      const newDisparity = ((stock.targetPrice - newPrice) / newPrice) * 100;
-      
-      const newRoe = stockData.roe !== null ? stockData.roe : stock.roe;
-      const newPer = stockData.per !== null ? stockData.per : stock.per;
-      const newPbr = stockData.pbr !== null ? stockData.pbr : stock.pbr;
-      
-      let newNews = stock.news;
-      // Only update news 30% of the time to avoid hitting API limits too hard
-      if (Math.random() > 0.7) {
-        const realNews = await fetchNaverNews(stock.name);
-        if (realNews) newNews = realNews.title;
-      }
-
-      return {
-        ...stock,
-        currentPrice: newPrice,
-        disparity: Math.round(newDisparity),
-        news: newNews,
-        roe: newRoe,
-        per: newPer,
-        pbr: newPbr
-      };
-    }));
-    updatedStocks.push(...chunkResults);
-    // Add a small delay between chunks
-    await new Promise(resolve => setTimeout(resolve, 500));
-  }
-  
-  mockStocks = updatedStocks;
+  // Force regenerate all stocks to simulate a full data refresh
+  const kospi = await generateStocks('KOSPI', KOSPI_DATA);
+  const kosdaq = await generateStocks('KOSDAQ', KOSDAQ_DATA);
+  mockStocks = [...kospi, ...kosdaq];
   res.json(mockStocks);
 });
 
