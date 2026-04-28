@@ -14,6 +14,7 @@ export default function App() {
   const [showSearchPopup, setShowSearchPopup] = useState(false);
   const [activeTab, setActiveTab] = useState<'WATCHLIST' | 'KOSPI' | 'KOSDAQ' | 'MACRO' | 'THEME' | 'UPGRADED'>('KOSPI');
   const [macroData, setMacroData] = useState<MacroData | null>(null);
+  const [indices, setIndices] = useState<any[]>([]);
   const [selectedTheme, setSelectedTheme] = useState<string>('');
   const [themeSearchQuery, setThemeSearchQuery] = useState('');
   const [visitors, setVisitors] = useState({ today: 0, total: 0 });
@@ -41,6 +42,19 @@ export default function App() {
     };
     recordVisit();
 
+    const fetchInitialIndices = async () => {
+      try {
+        const res = await fetch('/api/indices');
+        if (res.ok) {
+          const data = await res.json();
+          setIndices(data);
+        }
+      } catch (e) {
+        console.error('Failed to fetch indices', e);
+      }
+    };
+    fetchInitialIndices();
+
     // Load watchlist from local storage
     const saved = localStorage.getItem('quant-watchlist');
     if (saved) {
@@ -56,17 +70,21 @@ export default function App() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [stocksRes, newsRes, macroRes] = await Promise.all([
-        fetch('/api/stocks'),
-        fetch('/api/news'),
-        fetch('/api/macro')
+      const timestamp = Date.now();
+      const [stocksRes, newsRes, macroRes, indicesRes] = await Promise.all([
+        fetch(`/api/stocks?t=${timestamp}`, { cache: 'no-store' }),
+        fetch(`/api/news?t=${timestamp}`, { cache: 'no-store' }),
+        fetch(`/api/macro?t=${timestamp}`, { cache: 'no-store' }),
+        fetch(`/api/indices?t=${timestamp}`, { cache: 'no-store' })
       ]);
       const stocksData = await stocksRes.json();
       const newsData = await newsRes.json();
       const macroData = await macroRes.json();
+      const indicesData = await indicesRes.json();
       setStocks(stocksData);
       setNews(newsData);
       setMacroData(macroData);
+      setIndices(indicesData);
     } catch (error) {
       console.error('Failed to fetch data', error);
     } finally {
@@ -78,17 +96,21 @@ export default function App() {
     setRefreshing(true);
     setLoading(true);
     try {
-      const [stocksRes, newsRes, macroRes] = await Promise.all([
-        fetch('/api/refresh'),
-        fetch('/api/news'),
-        fetch('/api/macro')
+      const timestamp = Date.now();
+      const [stocksRes, newsRes, macroRes, indicesRes] = await Promise.all([
+        fetch(`/api/refresh?t=${timestamp}`, { cache: 'no-store' }),
+        fetch(`/api/news?t=${timestamp}`, { cache: 'no-store' }),
+        fetch(`/api/macro?t=${timestamp}`, { cache: 'no-store' }),
+        fetch(`/api/indices?t=${timestamp}`, { cache: 'no-store' })
       ]);
       const stocksData = await stocksRes.json();
       const newsData = await newsRes.json();
       const macroData = await macroRes.json();
+      const indicesData = await indicesRes.json();
       setStocks(stocksData);
       setNews(newsData);
       setMacroData(macroData);
+      setIndices(indicesData);
     } catch (error) {
       console.error('Failed to refresh data', error);
     } finally {
@@ -378,6 +400,32 @@ export default function App() {
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         
+        {/* Live Indices */}
+        {indices && indices.length > 0 && (
+          <div className="mb-6 grid grid-cols-2 gap-4">
+            {indices.map((ind, idx) => (
+              <a 
+                key={idx} 
+                href={ind.name === 'KOSPI' ? 'https://finance.naver.com/sise/sise_index.naver?code=KOSPI' : ind.name === 'KOSDAQ' ? 'https://finance.naver.com/sise/sise_index.naver?code=KOSDAQ' : '#'}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 shrink-0 hover:shadow-md transition-shadow cursor-pointer block"
+              >
+                <span className="text-sm font-bold text-slate-700">{ind.name}</span>
+                <div className="mt-1 flex items-baseline gap-2">
+                  <span className={`text-2xl font-black ${ind.change > 0 ? 'text-rose-600' : ind.change < 0 ? 'text-blue-600' : 'text-slate-700'}`}>
+                    {ind.value.toLocaleString()}
+                  </span>
+                </div>
+                <div className={`mt-1 flex items-center gap-1 text-sm font-medium ${ind.change > 0 ? 'text-rose-600' : ind.change < 0 ? 'text-blue-600' : 'text-slate-500'}`}>
+                  {ind.change > 0 ? <TrendingUp className="w-4 h-4" /> : ind.change < 0 ? <TrendingDown className="w-4 h-4" /> : null}
+                  <span>{ind.change > 0 ? '+' : ''}{ind.change} ({ind.changePercent > 0 ? '+' : ''}{ind.changePercent}%)</span>
+                </div>
+              </a>
+            ))}
+          </div>
+        )}
+
         {/* Real-time News Section */}
         <div className="mb-8 bg-white rounded-2xl shadow-sm border border-slate-200 p-4">
           <div className="flex items-center gap-2 mb-4">

@@ -101,57 +101,63 @@ async function fetchNaverNews(keyword: string) {
   return null;
 }
 
-async function fetchNaverStockData(code: string): Promise<{ currentPrice: number | null, per: number | null, pbr: number | null, roe: number | null }> {
+async function fetchNaverStockData(code: string): Promise<{ currentPrice: number | null, per: number | null, pbr: number | null, roe: number | null, targetPrice: number | null, targetBroker: string | null, targetDate: string | null }> {
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 3000);
-    const response = await fetch(`https://finance.naver.com/item/main.naver?code=${code}`, {
-      signal: controller.signal,
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-      }
-    });
-    clearTimeout(timeoutId);
-    const html = await response.text();
+    const [apiRes, wiseRes] = await Promise.all([
+      fetch(`https://m.stock.naver.com/api/stock/${code}/integration`).catch(() => null),
+      fetch(`https://navercomp.wisereport.co.kr/v2/company/c1010001.aspx?cmp_cd=${code}`).catch(() => null)
+    ]);
     
     let currentPrice = null;
-    const priceMatch = html.match(/<p class="no_today">\s*<em[^>]*>\s*<span class="blind">([\d,]+)<\/span>/);
-    if (priceMatch && priceMatch[1]) {
-      currentPrice = parseInt(priceMatch[1].replace(/,/g, ''), 10);
-    }
-
     let per = null;
-    const perMatch = html.match(/<em id="_per">([\d,.]+)<\/em>/);
-    if (perMatch && perMatch[1]) {
-      per = parseFloat(perMatch[1].replace(/,/g, ''));
-    }
-
     let pbr = null;
-    const pbrMatch = html.match(/<em id="_pbr">([\d,.]+)<\/em>/);
-    if (pbrMatch && pbrMatch[1]) {
-      pbr = parseFloat(pbrMatch[1].replace(/,/g, ''));
-    }
-
     let roe = null;
-    const roeMatch = html.match(/<th scope="row" class="h_th2 th_cop_anal13"><strong>ROE\(지배주주\)<\/strong><\/th>([\s\S]*?)<\/tr>/);
-    if (roeMatch) {
-      const tds = roeMatch[1].match(/<td[^>]*>([\s\S]*?)<\/td>/g);
-      if (tds && tds.length >= 4) {
-        let roeStr = tds[3].replace(/<[^>]+>/g, '').trim();
-        if (!roeStr || isNaN(parseFloat(roeStr))) {
-          roeStr = tds[2].replace(/<[^>]+>/g, '').trim();
-        }
-        if (roeStr && !isNaN(parseFloat(roeStr))) {
-          roe = parseFloat(roeStr);
-        }
+    
+    if (apiRes && apiRes.ok) {
+       const json = await apiRes.json();
+       const basicRes = await fetch(`https://m.stock.naver.com/api/stock/${code}/basic`).catch(() => null);
+       if (basicRes && basicRes.ok) {
+           const basicJson = await basicRes.json();
+           if (basicJson.closePrice) {
+              currentPrice = parseInt(basicJson.closePrice.replace(/,/g, ''), 10);
+           }
+       }
+       
+       if (json.totalInfos) {
+          const infoPer = json.totalInfos.find((i: any) => i.code === 'per');
+          const infoPbr = json.totalInfos.find((i: any) => i.code === 'pbr');
+          if (infoPer && infoPer.value) per = parseFloat(infoPer.value.replace(/[^0-9.]/g, ''));
+          if (infoPbr && infoPbr.value) pbr = parseFloat(infoPbr.value.replace(/[^0-9.]/g, ''));
+          
+          if (per && pbr && per > 0) {
+             roe = parseFloat(((pbr / per) * 100).toFixed(2));
+          }
+       }
+    }
+    
+    let targetPrice = null;
+    let targetBroker = null;
+    let targetDate = null;
+    
+    if (wiseRes && wiseRes.ok) {
+      const buffer = await wiseRes.arrayBuffer();
+      const decoder = new TextDecoder('utf-8');
+      const wiseHtml = decoder.decode(buffer);
+      
+      const targetMatch = wiseHtml.match(/<td[^>]*class="line txt"[^>]*>([^<]+)<\/td>\s*<td class="line center">([^<]+)<\/td>\s*<td class="line num">([^<]+)<\/td>/);
+      if (targetMatch) {
+         const broker = targetMatch[1].trim();
+         targetBroker = broker.endsWith('증권') ? broker : broker + '증권';
+         const dateParts = targetMatch[2].trim().split('/');
+         targetDate = dateParts.length === 3 ? `20${dateParts[0]}/${dateParts[1]}/${dateParts[2]}` : targetMatch[2].trim();
+         targetPrice = parseInt(targetMatch[3].trim().replace(/,/g, ''), 10);
       }
     }
-
-    return { currentPrice, per, pbr, roe };
+    return { currentPrice, per, pbr, roe, targetPrice, targetBroker, targetDate };
   } catch (error) {
     console.error(`Failed to fetch data for ${code}:`, error instanceof Error ? error.message : error);
   }
-  return { currentPrice: null, per: null, pbr: null, roe: null };
+  return { currentPrice: null, per: null, pbr: null, roe: null, targetPrice: null, targetBroker: null, targetDate: null };
 }
 
 function calculateValueScore(roe: number, per: number, peg: number, fcf: number, pbr: number): number {
@@ -239,15 +245,21 @@ const THEME_MAP: Record<string, string[]> = {
 
 const generateStocks = async (market: 'KOSPI' | 'KOSDAQ', data: {name: string, code: string, basePrice: number}[]) => {
   const stocks = [];
-  const chunkSize = 5;
+  const chunkSize = 10;
   
   for (let i = 0; i < data.length; i += chunkSize) {
     const chunk = data.slice(i, i + chunkSize);
     const chunkResults = await Promise.all(chunk.map(async (item, index) => {
       const stockData = await fetchNaverStockData(item.code);
       const currentPrice = stockData.currentPrice || item.basePrice;
-      const disparity = Math.floor(Math.random() * 150) - 20; // -20% to 130%
-      const targetPrice = Math.floor(currentPrice * (1 + disparity / 100));
+      let targetPrice = stockData.targetPrice;
+      let disparity;
+      if (targetPrice) {
+        disparity = Math.round(((targetPrice - currentPrice) / currentPrice) * 100);
+      } else {
+        disparity = Math.floor(Math.random() * 150) - 20; // -20% to 130%
+        targetPrice = Math.floor(currentPrice * (1 + disparity / 100));
+      }
       const score = Math.floor(Math.random() * 30) + 70; // 70 to 100
       
       const roe = stockData.roe !== null ? stockData.roe : parseFloat((Math.random() * 30 + 5).toFixed(1));
@@ -272,7 +284,7 @@ const generateStocks = async (market: 'KOSPI' | 'KOSDAQ', data: {name: string, c
       const news = realNews ? realNews.title : newsList[Math.floor(Math.random() * newsList.length)];
       
       const brokers = ['삼성증권', 'NH투자증권', 'KB증권', '미래에셋증권', '한국투자증권', '키움증권'];
-      const targetBroker = brokers[Math.floor(Math.random() * brokers.length)];
+      const targetBroker = stockData.targetBroker || brokers[Math.floor(Math.random() * brokers.length)];
       
       const themes = THEME_MAP[item.name] || ['기타'];
       const targetUpgraded = Math.random() > 0.7; // 30% chance of target price upgrade
@@ -280,7 +292,7 @@ const generateStocks = async (market: 'KOSPI' | 'KOSDAQ', data: {name: string, c
       // Generate a random date within the last 30 days
       const date = new Date();
       date.setDate(date.getDate() - Math.floor(Math.random() * 30));
-      const targetDate = `${date.getFullYear()}/${String(date.getMonth() + 1).padStart(2, '0')}/${String(date.getDate()).padStart(2, '0')}`;
+      const targetDate = stockData.targetDate || `${date.getFullYear()}/${String(date.getMonth() + 1).padStart(2, '0')}/${String(date.getDate()).padStart(2, '0')}`;
 
       return {
         id: `${market}-${i + index}`,
@@ -331,10 +343,56 @@ app.get('/api/stocks', async (req, res) => {
 });
 
 app.get('/api/refresh', async (req, res) => {
-  // Force regenerate all stocks to simulate a full data refresh
-  const kospi = await generateStocks('KOSPI', KOSPI_DATA);
-  const kosdaq = await generateStocks('KOSDAQ', KOSDAQ_DATA);
-  mockStocks = [...kospi, ...kosdaq];
+  if (mockStocks.length === 0) {
+    const kospi = await generateStocks('KOSPI', KOSPI_DATA);
+    const kosdaq = await generateStocks('KOSDAQ', KOSDAQ_DATA);
+    mockStocks = [...kospi, ...kosdaq];
+    return res.json(mockStocks);
+  }
+
+  const updatedStocks = [];
+  const chunkSize = 10;
+  for (let i = 0; i < mockStocks.length; i += chunkSize) {
+    const chunk = mockStocks.slice(i, i + chunkSize);
+    const chunkResults = await Promise.all(chunk.map(async (stock) => {
+      const stockData = await fetchNaverStockData(stock.code);
+      const newPrice = stockData.currentPrice || stock.currentPrice;
+      const roe = stockData.roe !== null ? stockData.roe : stock.roe;
+      const per = stockData.per !== null ? stockData.per : stock.per;
+      const pbr = stockData.pbr !== null ? stockData.pbr : stock.pbr;
+      const targetPrice = stockData.targetPrice || stock.targetPrice;
+      const targetBroker = stockData.targetBroker || stock.targetBroker;
+      const targetDate = stockData.targetDate || stock.targetDate;
+      const newDisparity = ((targetPrice - newPrice) / newPrice) * 100;
+      const targetUpgraded = stockData.targetPrice ? stockData.targetPrice > stock.targetPrice : stock.targetUpgraded;
+      
+      const valueScore = calculateValueScore(roe, per, stock.peg, stock.fcf, pbr);
+      const score = Math.floor((valueScore + stock.score) / 2); // Blend with previous score to maintain some stability
+      let signal: 'BUY' | 'WAIT' = 'WAIT';
+      if (score >= 80 && newDisparity >= 20) signal = 'BUY';
+      else if (score >= 70 && newDisparity >= 10) signal = Math.random() > 0.5 ? 'BUY' : 'WAIT';
+
+      return {
+        ...stock,
+        currentPrice: newPrice,
+        targetPrice: targetPrice,
+        targetBroker: targetBroker,
+        targetDate: targetDate,
+        targetUpgraded: targetUpgraded,
+        disparity: Math.round(newDisparity),
+        roe,
+        per,
+        pbr,
+        score,
+        valueScore,
+        signal
+      };
+    }));
+    updatedStocks.push(...chunkResults);
+    await new Promise(resolve => setTimeout(resolve, 500));
+  }
+  
+  mockStocks = updatedStocks.sort((a, b) => b.score - a.score);
   res.json(mockStocks);
 });
 
@@ -362,6 +420,37 @@ async function fetchMarketNews(display: number = 10) {
   }
   return null;
 }
+
+app.get('/api/indices', async (req, res) => {
+  try {
+    const symbols = ['^KS11', '^KQ11'];
+    const quotes = await Promise.all(
+      symbols.map(symbol => yf.quote(symbol).catch(() => null))
+    );
+
+    const [kospiQuote, kosdaqQuote] = quotes;
+
+    const indices = [
+      {
+        name: 'KOSPI',
+        value: kospiQuote?.regularMarketPrice ? Number(kospiQuote.regularMarketPrice.toFixed(2)) : 0,
+        change: kospiQuote?.regularMarketChange ? Number(kospiQuote.regularMarketChange.toFixed(2)) : 0,
+        changePercent: kospiQuote?.regularMarketChangePercent ? Number(kospiQuote.regularMarketChangePercent.toFixed(2)) : 0,
+      },
+      {
+        name: 'KOSDAQ',
+        value: kosdaqQuote?.regularMarketPrice ? Number(kosdaqQuote.regularMarketPrice.toFixed(2)) : 0,
+        change: kosdaqQuote?.regularMarketChange ? Number(kosdaqQuote.regularMarketChange.toFixed(2)) : 0,
+        changePercent: kosdaqQuote?.regularMarketChangePercent ? Number(kosdaqQuote.regularMarketChangePercent.toFixed(2)) : 0,
+      }
+    ];
+
+    res.json(indices);
+  } catch (error) {
+    console.error('Failed to fetch indices:', error);
+    res.status(500).json({ error: 'Failed to fetch indices' });
+  }
+});
 
 app.get('/api/macro', async (req, res) => {
   try {
@@ -502,7 +591,7 @@ app.get('/api/macro', async (req, res) => {
           trend: tnxQuote ? getTrend(tnxQuote.regularMarketChange || 0) : 'flat',
           upImpact: '기술주/성장주 악재, 금융주 수혜',
           downImpact: '기술주/성장주 수혜',
-          link: 'https://www.google.com/finance/quote/US10Y:BOND'
+          link: 'https://finance.yahoo.com/quote/%5ETNX'
         },
         { 
           name: 'VIX (공포지수)', 
