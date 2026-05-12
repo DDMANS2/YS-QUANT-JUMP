@@ -1,5 +1,6 @@
 import express from 'express';
 import YahooFinance from 'yahoo-finance2';
+import iconv from 'iconv-lite';
 
 const yf = new YahooFinance({ suppressNotices: ['yahooSurvey'] });
 
@@ -243,6 +244,121 @@ const THEME_MAP: Record<string, string[]> = {
   '캐리소프트': ['저출산대책', '웹툰/게임']
 };
 
+async function fetchUpgradedStocks() {
+  const upgraded = [];
+  try {
+    const now = new Date();
+    const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    // Remove the time portion to only compare dates
+    oneWeekAgo.setHours(0, 0, 0, 0);
+
+    let stopFetching = false;
+    for (let page = 1; page <= 10; page++) {
+      if (stopFetching) break;
+      
+      const url = `https://finance.naver.com/research/company_list.naver?keyword=&brokerCode=&searchType=title&page=${page}`;
+      const res = await fetch(url);
+      const buffer = await res.arrayBuffer();
+      const html = iconv.decode(Buffer.from(buffer), 'euc-kr');
+      const rows = html.match(/<tr>[\s\S]*?<\/tr>/g);
+      
+      if(rows) {
+          for(let i=0; i<rows.length; i++) {
+            const tr = rows[i];
+            if (tr.includes('stock_item')) {
+               const codeMatch = tr.match(/code=(\d{6})/);
+               const nameMatch = tr.match(/title="([^"]+)"/);
+               const tdMatches = tr.match(/<td[^>]*>([\s\S]*?)<\/td>/g);
+               if (codeMatch && nameMatch && tdMatches && tdMatches.length >= 5) {
+                    const title = tdMatches[1].replace(/<[^>]+>/g, '').trim().replace(/\s+/g, ' ');
+                    
+                    let dateStr = tdMatches[4].replace(/<[^>]+>/g, '').trim().replace(/\s+/g, ' ');
+                    let reportDate = null;
+                    if (dateStr.split('.').length === 3) {
+                       const parts = dateStr.split('.');
+                       dateStr = `20${parts[0]}/${parts[1]}/${parts[2]}`;
+                       reportDate = new Date(dateStr);
+                    }
+                    
+                    if (reportDate && reportDate < oneWeekAgo) {
+                       stopFetching = true;
+                       break; // We've moved past the 7 day window
+                    }
+                    
+                    if (title.includes('상향') || title.includes('목표주가 향상')) {
+                        const code = codeMatch[1];
+                        const name = nameMatch[1];
+                        const broker = tdMatches[2].replace(/<[^>]+>/g, '').trim().replace(/\s+/g, ' ');
+                        
+                        // Check if we already have it to avoid duplicates
+                        if (!upgraded.some(s => s.code === code)) {
+                          upgraded.push({code, name, news: title, broker, dateStr});
+                        }
+                    }
+               }
+            }
+          }
+      } else {
+        break;
+      }
+    }
+    
+    // Now construct the stock objects
+    const results = await Promise.all(upgraded.map(async (u, idx) => {
+      const stockData = await fetchNaverStockData(u.code);
+      const currentPrice = stockData.currentPrice || Math.floor(Math.random() * 100000) + 10000;
+      const targetPrice = stockData.targetPrice || Math.floor(currentPrice * 1.3);
+      const disparity = Math.round(((targetPrice - currentPrice) / currentPrice) * 100);
+      
+      const roe = stockData.roe !== null ? stockData.roe : parseFloat((Math.random() * 30 + 5).toFixed(1));
+      const per = stockData.per !== null ? stockData.per : parseFloat((Math.random() * 20 + 5).toFixed(1));
+      const pbr = stockData.pbr !== null ? stockData.pbr : parseFloat((Math.random() * 3 + 0.5).toFixed(2));
+      const peg = parseFloat((Math.random() * 1.5 + 0.1).toFixed(2));
+      const fcf = Math.floor(Math.random() * 5000) + 100;
+      const valueScore = calculateValueScore(roe, per, peg, fcf, pbr);
+      const score = Math.floor(Math.random() * 30) + 70;
+      const signal = 'BUY';
+      
+      const sectors = ['IT', '금융', '제조', '바이오', '서비스', '화학', '건설'];
+      const sector = sectors[Math.floor(Math.random() * sectors.length)];
+      
+      return {
+        id: `UPGRADED-${u.code}-${idx}`,
+        code: u.code,
+        name: u.name,
+        market: 'KOSPI' as const,
+        sector,
+        score,
+        targetPrice,
+        targetBroker: u.broker,
+        targetDate: u.dateStr,
+        currentPrice,
+        disparity,
+        roe,
+        sectorRoe: parseFloat((Math.random() * 15 + 5).toFixed(1)),
+        per,
+        sectorPer: parseFloat((Math.random() * 15 + 10).toFixed(1)),
+        peg,
+        sectorPeg: parseFloat((Math.random() * 1.0 + 0.5).toFixed(2)),
+        fcf,
+        sectorFcf: Math.floor(Math.random() * 2000) + 500,
+        pbr,
+        sectorPbr: parseFloat((Math.random() * 1.5 + 0.5).toFixed(2)),
+        valueScore,
+        signal,
+        news: `[목표가 상향] ${u.news}`,
+        themes: THEME_MAP[u.name] || ['목표가상향'],
+        targetUpgraded: true,
+        isUpgradedList: true
+      };
+    }));
+    return results;
+  } catch(e) {
+    console.error('Failed to fetch upgraded stocks', e);
+  }
+  return [];
+}
+
 const generateStocks = async (market: 'KOSPI' | 'KOSDAQ', data: {name: string, code: string, basePrice: number}[]) => {
   const stocks = [];
   const chunkSize = 10;
@@ -287,7 +403,7 @@ const generateStocks = async (market: 'KOSPI' | 'KOSDAQ', data: {name: string, c
       const targetBroker = stockData.targetBroker || brokers[Math.floor(Math.random() * brokers.length)];
       
       const themes = THEME_MAP[item.name] || ['기타'];
-      const targetUpgraded = Math.random() > 0.7; // 30% chance of target price upgrade
+      const targetUpgraded = false; // Real upgraded stocks are generated separately
       
       // Generate a random date within the last 30 days
       const date = new Date();
@@ -337,7 +453,8 @@ app.get('/api/stocks', async (req, res) => {
   if (mockStocks.length === 0) {
     const kospi = await generateStocks('KOSPI', KOSPI_DATA);
     const kosdaq = await generateStocks('KOSDAQ', KOSDAQ_DATA);
-    mockStocks = [...kospi, ...kosdaq];
+    const upgraded = await fetchUpgradedStocks();
+    mockStocks = [...upgraded, ...kospi, ...kosdaq];
   }
   res.json(mockStocks);
 });
@@ -346,14 +463,19 @@ app.get('/api/refresh', async (req, res) => {
   if (mockStocks.length === 0) {
     const kospi = await generateStocks('KOSPI', KOSPI_DATA);
     const kosdaq = await generateStocks('KOSDAQ', KOSDAQ_DATA);
-    mockStocks = [...kospi, ...kosdaq];
+    const upgraded = await fetchUpgradedStocks();
+    mockStocks = [...upgraded, ...kospi, ...kosdaq];
     return res.json(mockStocks);
   }
 
+  // Remove existing upgraded stocks
+  const baseStocks = mockStocks.filter((s: any) => !s.isUpgradedList);
+  const newUpgraded = await fetchUpgradedStocks();
+
   const updatedStocks = [];
   const chunkSize = 10;
-  for (let i = 0; i < mockStocks.length; i += chunkSize) {
-    const chunk = mockStocks.slice(i, i + chunkSize);
+  for (let i = 0; i < baseStocks.length; i += chunkSize) {
+    const chunk = baseStocks.slice(i, i + chunkSize);
     const chunkResults = await Promise.all(chunk.map(async (stock) => {
       const stockData = await fetchNaverStockData(stock.code);
       const newPrice = stockData.currentPrice || stock.currentPrice;
@@ -364,9 +486,10 @@ app.get('/api/refresh', async (req, res) => {
       const targetBroker = stockData.targetBroker || stock.targetBroker;
       const targetDate = stockData.targetDate || stock.targetDate;
       const newDisparity = ((targetPrice - newPrice) / newPrice) * 100;
-      const targetUpgraded = stockData.targetPrice ? stockData.targetPrice > stock.targetPrice : stock.targetUpgraded;
+      const targetUpgraded = false; // We use newUpgraded for true ones
       
       const valueScore = calculateValueScore(roe, per, stock.peg, stock.fcf, pbr);
+
       const score = Math.floor((valueScore + stock.score) / 2); // Blend with previous score to maintain some stability
       let signal: 'BUY' | 'WAIT' = 'WAIT';
       if (score >= 80 && newDisparity >= 20) signal = 'BUY';
@@ -392,6 +515,7 @@ app.get('/api/refresh', async (req, res) => {
     await new Promise(resolve => setTimeout(resolve, 500));
   }
   
+  updatedStocks.push(...newUpgraded);
   mockStocks = updatedStocks.sort((a, b) => b.score - a.score);
   res.json(mockStocks);
 });

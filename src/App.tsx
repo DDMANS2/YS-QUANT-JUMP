@@ -532,12 +532,23 @@ export default function App() {
                 )}
                 {activeTab === 'MACRO' && renderMacroTab()}
                 {activeTab === 'THEME' && renderThemeTab()}
-                {activeTab === 'UPGRADED' && (
-                  <>
-                    {renderTable(stocks.filter(s => s.targetUpgraded))}
-                    {renderCards(stocks.filter(s => s.targetUpgraded))}
-                  </>
-                )}
+                {activeTab === 'UPGRADED' && (() => {
+                  const upgradedList = [...stocks.filter(s => s.targetUpgraded)].sort((a, b) => new Date(b.targetDate).getTime() - new Date(a.targetDate).getTime());
+                  return (
+                    <>
+                      {upgradedList.length > 0 ? (
+                        <>
+                          {renderTable(upgradedList)}
+                          {renderCards(upgradedList)}
+                        </>
+                      ) : (
+                        <div className="text-center py-12 text-slate-500 bg-slate-50 rounded-xl border border-slate-100 border-dashed m-4">
+                          최근 목표가 상향 리포트가 발견되지 않았습니다.
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
               </motion.div>
             </AnimatePresence>
           )}
