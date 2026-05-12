@@ -248,12 +248,12 @@ async function fetchUpgradedStocks() {
   const upgraded = [];
   try {
     const now = new Date();
-    const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const oneMonthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
     // Remove the time portion to only compare dates
-    oneWeekAgo.setHours(0, 0, 0, 0);
+    oneMonthAgo.setHours(0, 0, 0, 0);
 
     let stopFetching = false;
-    for (let page = 1; page <= 10; page++) {
+    for (let page = 1; page <= 50; page++) {
       if (stopFetching) break;
       
       const url = `https://finance.naver.com/research/company_list.naver?keyword=&brokerCode=&searchType=title&page=${page}`;
@@ -280,9 +280,9 @@ async function fetchUpgradedStocks() {
                        reportDate = new Date(dateStr);
                     }
                     
-                    if (reportDate && reportDate < oneWeekAgo) {
+                    if (reportDate && reportDate < oneMonthAgo) {
                        stopFetching = true;
-                       break; // We've moved past the 7 day window
+                       break; // We've moved past the 30 day window
                     }
                     
                     if (title.includes('상향') || title.includes('목표주가 향상')) {
