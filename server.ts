@@ -1,6 +1,7 @@
 import express from 'express';
 import YahooFinance from 'yahoo-finance2';
 import iconv from 'iconv-lite';
+import * as cheerio from 'cheerio';
 
 const yf = new YahooFinance({ suppressNotices: ['yahooSurvey'] });
 
@@ -592,10 +593,41 @@ app.get('/api/indices', async (req, res) => {
 
 app.get('/api/macro', async (req, res) => {
   try {
+    const fetchBOKRate = async () => {
+      try {
+        const url = 'https://www.bok.or.kr/portal/singl/baseRate/list.do?dataSeCd=01&menuNo=200643';
+        const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+        const html = await res.text();
+        const ch = cheerio.load(html);
+        const td = ch('.fixed tbody tr').first().find('td').eq(2).text();
+        return parseFloat(td);
+      } catch (e) { console.error('BOK fetch error', e); return null; }
+    };
+
+    const fetchFedRate = async () => {
+      try {
+        const url = 'https://www.federalreserve.gov/releases/h15/';
+        const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+        const html = await res.text();
+        const ch = cheerio.load(html);
+        let rate = null;
+        ch('#h15table tbody tr').each((i, el) => {
+           const th = ch(el).find('th').text().trim();
+           if (th.includes('Federal funds (effective)')) {
+               const tds = ch(el).find('td');
+               rate = ch(tds[tds.length - 1]).text().trim();
+           }
+        });
+        return rate ? parseFloat(rate) : null;
+      } catch (e) { console.error('Fed fetch error', e); return null; }
+    };
+
     const symbols = ['KRW=X', 'CL=F', '^TNX', '^VIX'];
-    const quotes = await Promise.all(
-      symbols.map(symbol => yf.quote(symbol).catch(() => null))
-    );
+    const [quotes, bokRate, fedRate] = await Promise.all([
+      Promise.all(symbols.map(symbol => yf.quote(symbol).catch(() => null))),
+      fetchBOKRate(),
+      fetchFedRate()
+    ]);
 
     const [krwQuote, wtiQuote, tnxQuote, vixQuote] = quotes;
 
@@ -741,6 +773,28 @@ app.get('/api/macro', async (req, res) => {
           upImpact: '안전자산 선호 심리 강해짐',
           downImpact: '위험자산(주식) 선호 심리 회복',
           link: 'https://www.google.com/finance/quote/VIX:INDEXCBOE'
+        },
+        { 
+          name: '미국 기준금리', 
+          value: fedRate || 0, 
+          change: 0, 
+          changePercent: 0, 
+          unit: '%', 
+          trend: 'flat',
+          upImpact: '시장 유동성 축소, 주가 하방 압력',
+          downImpact: '시장 유동성 확대, 주식 시장 호재',
+          link: 'https://kr.investing.com/economic-calendar/interest-rate-decision-168'
+        },
+        { 
+          name: '한국 기준금리', 
+          value: bokRate || 0, 
+          change: 0, 
+          changePercent: 0, 
+          unit: '%', 
+          trend: 'flat',
+          upImpact: '국내 대출 금리 상승, 내수 기업 부담 완화 필요',
+          downImpact: '내수 촉진, 부동산 / 증시 자금 유입 기대',
+          link: 'https://www.bok.or.kr/portal/singl/baseRate/list.do?dataSeCd=01&menuNo=200643'
         }
       ],
       insights: generateInsights()
