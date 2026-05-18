@@ -2,16 +2,43 @@ import express from 'express';
 import YahooFinance from 'yahoo-finance2';
 import iconv from 'iconv-lite';
 import * as cheerio from 'cheerio';
+import fs from 'fs';
+import path from 'path';
 
 const yf = new YahooFinance({ suppressNotices: ['yahooSurvey'] });
 
 const app = express();
 const PORT = 3000;
 
-// Visitor tracking state (in-memory for prototype)
+// Visitor tracking state with file persistence
+const VISITORS_FILE = path.join(process.cwd(), 'visitors.json');
+
 let totalVisitors = 0;
 let todayVisitors = 0;
 let lastResetDate = new Date().toDateString();
+
+if (fs.existsSync(VISITORS_FILE)) {
+  try {
+    const data = JSON.parse(fs.readFileSync(VISITORS_FILE, 'utf-8'));
+    totalVisitors = data.totalVisitors || 0;
+    todayVisitors = data.todayVisitors || 0;
+    lastResetDate = data.lastResetDate || new Date().toDateString();
+  } catch (e) {
+    console.error('Failed to load visitors.json', e);
+  }
+}
+
+function saveVisitors() {
+  try {
+    fs.writeFileSync(VISITORS_FILE, JSON.stringify({
+      totalVisitors,
+      todayVisitors,
+      lastResetDate
+    }));
+  } catch (e) {
+    console.error('Failed to save visitors.json', e);
+  }
+}
 
 app.post('/api/visit', (req, res) => {
   const today = new Date().toDateString();
@@ -21,6 +48,7 @@ app.post('/api/visit', (req, res) => {
   }
   totalVisitors++;
   todayVisitors++;
+  saveVisitors();
   res.json({ today: todayVisitors, total: totalVisitors });
 });
 
@@ -29,6 +57,7 @@ app.get('/api/visitors', (req, res) => {
   if (today !== lastResetDate) {
     todayVisitors = 0;
     lastResetDate = today;
+    saveVisitors();
   }
   res.json({ today: todayVisitors, total: totalVisitors });
 });
