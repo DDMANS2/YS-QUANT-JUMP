@@ -285,7 +285,7 @@ async function fetchUpgradedStocks() {
                        break; // We've moved past the 30 day window
                     }
                     
-                    if (title.includes('상향') || title.includes('목표주가 향상')) {
+                    if (title.includes('상향') || title.includes('목표주가 향상') || title.includes('업사이드') || title.includes('상회')) {
                         const code = codeMatch[1];
                         const name = nameMatch[1];
                         const broker = tdMatches[2].replace(/<[^>]+>/g, '').trim().replace(/\s+/g, ' ');
@@ -448,13 +448,27 @@ const generateStocks = async (market: 'KOSPI' | 'KOSDAQ', data: {name: string, c
 };
 
 let mockStocks: any[] = [];
+let lastUpgradedFetch = 0;
+let isFetchingUpgraded = false;
 
 app.get('/api/stocks', async (req, res) => {
   if (mockStocks.length === 0) {
     const kospi = await generateStocks('KOSPI', KOSPI_DATA);
     const kosdaq = await generateStocks('KOSDAQ', KOSDAQ_DATA);
     const upgraded = await fetchUpgradedStocks();
+    lastUpgradedFetch = Date.now();
     mockStocks = [...upgraded, ...kospi, ...kosdaq];
+  } else if (Date.now() - lastUpgradedFetch > 5 * 60 * 1000 && !isFetchingUpgraded) {
+    isFetchingUpgraded = true;
+    fetchUpgradedStocks().then(newUpgraded => {
+      const baseStocks = mockStocks.filter((s: any) => !s.isUpgradedList);
+      mockStocks = [...newUpgraded, ...baseStocks];
+      lastUpgradedFetch = Date.now();
+      isFetchingUpgraded = false;
+    }).catch(e => {
+      console.error(e);
+      isFetchingUpgraded = false;
+    });
   }
   res.json(mockStocks);
 });
@@ -715,7 +729,7 @@ app.get('/api/macro', async (req, res) => {
           trend: tnxQuote ? getTrend(tnxQuote.regularMarketChange || 0) : 'flat',
           upImpact: '기술주/성장주 악재, 금융주 수혜',
           downImpact: '기술주/성장주 수혜',
-          link: 'https://finance.yahoo.com/quote/%5ETNX'
+          link: 'https://kr.investing.com/rates-bonds/u.s.-10-year-bond-yield'
         },
         { 
           name: 'VIX (공포지수)', 

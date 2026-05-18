@@ -144,8 +144,8 @@ export default function App() {
     });
   };
 
-  const kospiStocks = stocks.filter(s => s.market === 'KOSPI');
-  const kosdaqStocks = stocks.filter(s => s.market === 'KOSDAQ');
+  const kospiStocks = stocks.filter(s => s.market === 'KOSPI' && !s.isUpgradedList);
+  const kosdaqStocks = stocks.filter(s => s.market === 'KOSDAQ' && !s.isUpgradedList);
   const watchlistedStocks = stocks.filter(s => watchlist.includes(s.code));
 
   const renderTable = (data: Stock[]) => (
